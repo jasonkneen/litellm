@@ -25,6 +25,7 @@ from functools import partial
 from typing import (
     Any,
     Callable,
+    Coroutine,
     Dict,
     List,
     Literal,
@@ -2245,7 +2246,12 @@ def completion(  # type: ignore # noqa: PLR0915
                     additional_args={"headers": headers},
                 )
         elif custom_llm_provider == "openrouter":
-            api_base = api_base or litellm.api_base or "https://openrouter.ai/api/v1"
+            api_base = (
+                api_base
+                or litellm.api_base
+                or get_secret_str("OPENROUTER_API_BASE")
+                or "https://openrouter.ai/api/v1"
+            )
 
             api_key = (
                 api_key
@@ -2344,6 +2350,8 @@ def completion(  # type: ignore # noqa: PLR0915
                 or litellm.api_key
             )
 
+            api_base = api_base or litellm.api_base or get_secret("GEMINI_API_BASE")
+
             new_params = deepcopy(optional_params)
             response = vertex_chat_completion.completion(  # type: ignore
                 model=model,
@@ -2385,6 +2393,8 @@ def completion(  # type: ignore # noqa: PLR0915
                 or optional_params.pop("vertex_ai_credentials", None)
                 or get_secret("VERTEXAI_CREDENTIALS")
             )
+
+            api_base = api_base or litellm.api_base or get_secret("VERTEXAI_API_BASE")
 
             new_params = deepcopy(optional_params)
             if (
@@ -2598,6 +2608,7 @@ def completion(  # type: ignore # noqa: PLR0915
                 encoding=encoding,
                 logging_obj=logging,
                 acompletion=acompletion,
+                client=client,
             )
 
             ## RESPONSE OBJECT
@@ -3288,7 +3299,7 @@ def embedding(  # noqa: PLR0915
     litellm_call_id=None,
     logger_fn=None,
     **kwargs,
-) -> EmbeddingResponse:
+) -> Union[EmbeddingResponse, Coroutine[Any, Any, EmbeddingResponse]]:
     """
     Embedding function that calls an API to generate embeddings for the given input.
 
@@ -3409,7 +3420,9 @@ def embedding(  # noqa: PLR0915
     if mock_response is not None:
         return mock_embedding(model=model, mock_response=mock_response)
     try:
-        response: Optional[EmbeddingResponse] = None
+        response: Optional[
+            Union[EmbeddingResponse, Coroutine[Any, Any, EmbeddingResponse]]
+        ] = None
 
         if azure is True or custom_llm_provider == "azure":
             # azure configs
@@ -3648,6 +3661,8 @@ def embedding(  # noqa: PLR0915
                 api_key or get_secret_str("GEMINI_API_KEY") or litellm.api_key
             )
 
+            api_base = api_base or litellm.api_base or get_secret_str("GEMINI_API_BASE")
+
             response = google_batch_embeddings.batch_embeddings(  # type: ignore
                 model=model,
                 input=input,
@@ -3662,6 +3677,8 @@ def embedding(  # noqa: PLR0915
                 print_verbose=print_verbose,
                 custom_llm_provider="gemini",
                 api_key=gemini_api_key,
+                api_base=api_base,
+                client=client,
             )
 
         elif custom_llm_provider == "vertex_ai":
@@ -3686,6 +3703,13 @@ def embedding(  # noqa: PLR0915
                 or get_secret_str("VERTEX_CREDENTIALS")
             )
 
+            api_base = (
+                api_base
+                or litellm.api_base
+                or get_secret_str("VERTEXAI_API_BASE")
+                or get_secret_str("VERTEX_API_BASE")
+            )
+
             if (
                 "image" in optional_params
                 or "video" in optional_params
@@ -3699,6 +3723,7 @@ def embedding(  # noqa: PLR0915
                     encoding=encoding,
                     logging_obj=logging,
                     optional_params=optional_params,
+                    litellm_params=litellm_params_dict,
                     model_response=EmbeddingResponse(),
                     vertex_project=vertex_ai_project,
                     vertex_location=vertex_ai_location,
@@ -3706,6 +3731,8 @@ def embedding(  # noqa: PLR0915
                     aembedding=aembedding,
                     print_verbose=print_verbose,
                     custom_llm_provider="vertex_ai",
+                    client=client,
+                    api_base=api_base,
                 )
             else:
                 response = vertex_embedding.embedding(
@@ -3723,6 +3750,8 @@ def embedding(  # noqa: PLR0915
                     aembedding=aembedding,
                     print_verbose=print_verbose,
                     api_key=api_key,
+                    api_base=api_base,
+                    client=client,
                 )
         elif custom_llm_provider == "oobabooga":
             response = oobabooga.embedding(
@@ -3901,7 +3930,11 @@ def embedding(  # noqa: PLR0915
             raise LiteLLMUnknownProvider(
                 model=model, custom_llm_provider=custom_llm_provider
             )
-        if response is not None and hasattr(response, "_hidden_params"):
+        if (
+            response is not None
+            and hasattr(response, "_hidden_params")
+            and isinstance(response, EmbeddingResponse)
+        ):
             response._hidden_params["custom_llm_provider"] = custom_llm_provider
 
         if response is None:
@@ -4681,6 +4714,14 @@ def image_generation(  # noqa: PLR0915
                 or optional_params.pop("vertex_ai_credentials", None)
                 or get_secret_str("VERTEXAI_CREDENTIALS")
             )
+
+            api_base = (
+                api_base
+                or litellm.api_base
+                or get_secret_str("VERTEXAI_API_BASE")
+                or get_secret_str("VERTEX_API_BASE")
+            )
+
             model_response = vertex_image_generation.image_generation(
                 model=model,
                 prompt=prompt,
@@ -4692,6 +4733,8 @@ def image_generation(  # noqa: PLR0915
                 vertex_location=vertex_ai_location,
                 vertex_credentials=vertex_credentials,
                 aimg_generation=aimg_generation,
+                api_base=api_base,
+                client=client,
             )
         elif (
             custom_llm_provider in litellm._custom_providers
@@ -4944,6 +4987,10 @@ async def atranscription(*args, **kwargs) -> TranscriptionResponse:
         else:
             # Call the synchronous function using run_in_executor
             response = await loop.run_in_executor(None, func_with_context)
+        if not isinstance(response, TranscriptionResponse):
+            raise ValueError(
+                f"Invalid response from transcription provider, expected TranscriptionResponse, but got {type(response)}"
+            )
         return response
     except Exception as e:
         custom_llm_provider = custom_llm_provider or "openai"
@@ -4977,7 +5024,7 @@ def transcription(
     max_retries: Optional[int] = None,
     custom_llm_provider=None,
     **kwargs,
-) -> TranscriptionResponse:
+) -> Union[TranscriptionResponse, Coroutine[Any, Any, TranscriptionResponse]]:
     """
     Calls openai + azure whisper endpoints.
 
@@ -5046,7 +5093,15 @@ def transcription(
         custom_llm_provider=custom_llm_provider,
     )
 
-    response: Optional[TranscriptionResponse] = None
+    response: Optional[
+        Union[TranscriptionResponse, Coroutine[Any, Any, TranscriptionResponse]]
+    ] = None
+
+    provider_config = ProviderConfigManager.get_provider_audio_transcription_config(
+        model=model,
+        provider=LlmProviders(custom_llm_provider),
+    )
+
     if custom_llm_provider == "azure":
         # azure configs
         api_base = api_base or litellm.api_base or get_secret_str("AZURE_API_BASE")
@@ -5113,12 +5168,15 @@ def transcription(
             max_retries=max_retries,
             api_base=api_base,
             api_key=api_key,
+            provider_config=provider_config,
+            litellm_params=litellm_params_dict,
         )
     elif custom_llm_provider == "deepgram":
         response = base_llm_http_handler.audio_transcriptions(
             model=model,
             audio_file=file,
             optional_params=optional_params,
+            litellm_params=litellm_params_dict,
             model_response=model_response,
             atranscription=atranscription,
             client=(
@@ -5137,6 +5195,7 @@ def transcription(
             api_key=api_key,
             custom_llm_provider="deepgram",
             headers={},
+            provider_config=provider_config,
         )
     if response is None:
         raise ValueError("Unmapped provider passed in. Unable to get the response.")

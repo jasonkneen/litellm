@@ -300,6 +300,15 @@ class AnthropicConfig(BaseConfig):
         model: str,
         drop_params: bool,
     ) -> dict:
+
+        is_thinking_enabled = self.is_thinking_enabled(
+            non_default_params=non_default_params
+        )
+
+        ## handle thinking tokens
+        self.update_optional_params_with_thinking_tokens(
+            non_default_params=non_default_params, optional_params=optional_params
+        )
         for param, value in non_default_params.items():
             if param == "max_tokens":
                 optional_params["max_tokens"] = value
@@ -349,19 +358,23 @@ class AnthropicConfig(BaseConfig):
                 - Remember that the model will pass the input to the tool, so the name of the tool and description should be from the model’s perspective.
                 """
 
-                _tool_choice = {"name": RESPONSE_FORMAT_TOOL_NAME, "type": "tool"}
+                if not is_thinking_enabled:
+                    _tool_choice = {"name": RESPONSE_FORMAT_TOOL_NAME, "type": "tool"}
+                    optional_params["tool_choice"] = _tool_choice
+
                 _tool = self._create_json_tool_call_for_response_format(
                     json_schema=json_schema,
                 )
                 optional_params = self._add_tools_to_optional_params(
                     optional_params=optional_params, tools=[_tool]
                 )
-                optional_params["tool_choice"] = _tool_choice
+
                 optional_params["json_mode"] = True
             if param == "user":
                 optional_params["metadata"] = {"user_id": value}
             if param == "thinking":
                 optional_params["thinking"] = value
+
         return optional_params
 
     def _create_json_tool_call_for_response_format(
@@ -387,7 +400,7 @@ class AnthropicConfig(BaseConfig):
             _input_schema["additionalProperties"] = True
             _input_schema["properties"] = {}
         else:
-            _input_schema["properties"] = {"values": json_schema}
+            _input_schema.update(cast(AnthropicInputSchema, json_schema))
 
         _tool = AnthropicMessagesTool(
             name=RESPONSE_FORMAT_TOOL_NAME, input_schema=_input_schema

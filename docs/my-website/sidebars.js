@@ -62,6 +62,7 @@ const sidebars = {
         },
         "proxy/enterprise",
         "proxy/management_client",
+        "proxy/management_cli",
         {
           type: "category",
           label: "Making LLM Requests",
@@ -237,6 +238,7 @@ const sidebars = {
         "providers/watsonx",
         "providers/predibase",
         "providers/nvidia_nim",
+        { type: "doc", id: "providers/nscale", label: "Nscale (EU Sovereign)" },
         "providers/xai",
         "providers/lm_studio",
         "providers/cerebras",
@@ -551,6 +553,7 @@ const sidebars = {
             "projects/LiteLLM Proxy",
             "projects/llm_cord",
             "projects/pgai",
+            "projects/GPTLocalhost",
           ],
         },
         "proxy/pii_masking",
